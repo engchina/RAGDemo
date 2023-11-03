@@ -1,0 +1,18 @@
+langchain==0.0.325
+pydantic==1.10.13
+pypdf==3.12.1
+faiss-cpu==1.7.4
+fastapi==0.104.0
+sentence-transformers==2.2.2
+lazy-Load==0.8.3
+transformers==4.31.0
+uvicorn==0.22.0
+python-multipart==0.0.6
+gradio==3.50.2
+python-dotenv==1.0.0
+curl_cffi==0.5.10b3
+-e git+https://github.com/engchina/oci-cohere-python.git@main#egg=cohere
+openai==0.28.1
+bs4==0.0.1
+chromadb==0.4.15
+tiktoken==0.5.1

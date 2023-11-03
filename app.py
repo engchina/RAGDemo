@@ -1,0 +1,275 @@
+import os
+import openai
+import sys
+from dotenv import load_dotenv, find_dotenv
+
+# from curl_cffi import requests
+from langchain.document_loaders import WebBaseLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+from langchain.vectorstores import Chroma
+from langchain.chat_models import ChatOpenAI
+# from langchain.embeddings import OpenAIEmbeddings
+from langchain.embeddings import CohereEmbeddings
+from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.schema.runnable import RunnablePassthrough
+from langchain.prompts import PromptTemplate
+
+import gradio as gr
+
+sys.path.append('../..')
+
+# read local .env file
+_ = load_dotenv(find_dotenv())
+
+openai.api_key = os.environ['OPENAI_API_KEY']
+openai.api_base = os.environ['OPENAI_API_BASE']
+
+persist_directory = './docs/chroma/'
+embedding = CohereEmbeddings(model="embed-multilingual-v2.0")
+
+
+def chat_stream(question1_text):
+    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+    messages = [
+        SystemMessage(
+            content="You are a helpful assistant."
+        ),
+        HumanMessage(
+            content=question1_text
+        ),
+    ]
+    result = llm(messages)
+
+    return gr.Textbox(result.content)
+
+
+def load_document(web_page_url_text):
+    gr.Markdown(visible=False)
+    """
+    Specify a DocumentLoader to load in your unstructured data as Documents.
+    A Document is a dict with text (page_content) and metadata.
+    """
+    loader = WebBaseLoader(web_page_url_text)
+    global data
+    data = loader.load()
+    # print(f"data: {data}")
+    page_count = len(data)
+    page_content_text = data[0].page_content
+    while "\n\n" in page_content_text:
+        page_content_text = page_content_text.replace("\n\n", "\n")
+    data[0].page_content = page_content_text
+
+    return gr.Textbox(value=str(page_count)), gr.Textbox(value=page_content_text)
+
+
+def split_document(chunk_size_text, chunk_overlap_text):
+    """
+    Split the Document into chunks for embedding and vector storage.
+    """
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
+
+    global data, all_splits
+    all_splits = text_splitter.split_documents(data)
+    # print(f"all_splits: {all_splits}")
+    chunk_count_text = len(all_splits)
+    first_trunk_content_text = all_splits[0].page_content
+    last_trunk_content_text = all_splits[-1].page_content
+
+    return gr.Textbox(value=str(chunk_count_text)), gr.Textbox(value=first_trunk_content_text), gr.Textbox(
+        value=last_trunk_content_text), gr.Textbox(value=first_trunk_content_text), gr.Textbox(
+        value=last_trunk_content_text)
+
+
+def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_text):
+    """
+    To be able to look up our document splits, we first need to store them where we can later look them up.
+    The most common way to do this is to embed the contents of each document split.
+    We store the embedding and splits in a vectorstore.
+    """
+    first_trunk_vector_text = embedding.embed_documents([cope_of_first_trunk_content_text])
+    last_trunk_vector_text = embedding.embed_documents([cope_of_last_trunk_content_text])
+    vectorstore = Chroma.from_documents(persist_directory=persist_directory,
+                                        collection_name="docs",
+                                        documents=all_splits,
+                                        embedding=embedding)
+    # print(f"vectorstore: {vectorstore}")
+
+    return gr.Textbox(value=first_trunk_vector_text), gr.Textbox(value=last_trunk_vector_text)
+
+
+def chat_document_stream(question2_text):
+    """
+    Retrieve relevant splits for any question using similarity search.
+    This is simply "top K" retrieval where we select documents based on embedding similarity to the query.
+    """
+    vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
+                         embedding_function=embedding)
+    docs_dataframe = []
+    docs = vectorstore.similarity_search(question2_text)
+    print(f"len(docs): {len(docs)}")
+    for doc in docs:
+        print(f"doc: {doc}")
+        docs_dataframe.append([doc.page_content, doc.metadata["source"]])
+
+    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+    template = """Use the following pieces of context to answer the question at the end. 
+    If you don't know the answer, just say that you don't know, don't try to make up an answer. 
+    Use three sentences maximum and keep the answer as concise as possible. 
+    Always say "thanks for asking!" at the end of the answer. 
+    {context}
+    Question: {question}
+    Helpful Answer:"""
+    rag_prompt_custom = PromptTemplate.from_template(template)
+    retriever = vectorstore.as_retriever()
+
+    rag_chain = (
+            {"context": retriever, "question": RunnablePassthrough()} | rag_prompt_custom | llm
+    )
+
+    result = rag_chain.invoke(question2_text)
+    print(result)
+
+    return gr.Dataframe(value=docs_dataframe), gr.Textbox(result.content)
+
+
+with gr.Blocks() as app:
+    gr.Markdown(value="# RAG デモ")
+
+    with gr.Tabs() as tabs:
+        with gr.TabItem(label="Step-0.チャット"):
+            with gr.Row():
+                with gr.Column():
+                    answer1_text = gr.Textbox(label="回答", lines=15, max_lines=15,
+                                              autoscroll=False, interactive=False, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    question1_text = gr.Textbox(label="質問", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=["このドラマのストーリーを教えてください",
+                                          "鈴木保奈美さんの作品を教えてください"],
+                                inputs=question1_text)
+            with gr.Row():
+                with gr.Column():
+                    chat_button = gr.Button(value="送信", label="chat", variant="primary")
+
+        with gr.TabItem(label="Step-1.ドキュメントのロード"):
+            with gr.Row():
+                with gr.Column():
+                    page_count_text = gr.Textbox(label="ページ数", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    page_content_text = gr.Textbox(label="ページ内容", lines=15, max_lines=15, autoscroll=False,
+                                                   show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    web_page_url_text = gr.Textbox(label="ウェブページ URL", lines=1,
+                                                   value="https://ja.wikipedia.org/wiki/東京ラブストーリー")
+            with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
+                                          "https://ja.wikipedia.org/wiki/ニュースの女",
+                                          "https://ja.wikipedia.org/wiki/愛という名のもとに",
+                                          "https://ja.wikipedia.org/wiki/鈴木保奈美"],
+                                inputs=web_page_url_text)
+            with gr.Row():
+                with gr.Column():
+                    load_button = gr.Button(value="ロード", label="load", variant="primary")
+
+        with gr.TabItem(label="Step-2.ドキュメントの分割"):
+            with gr.Row():
+                with gr.Column():
+                    chunk_count_text = gr.Textbox(label="Chunk 数", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    first_trunk_content_text = gr.Textbox(label="最初の Chunk 内容", lines=10, max_lines=10,
+                                                          autoscroll=False, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    last_trunk_content_text = gr.Textbox(label="最後の Chunk 内容", lines=10, max_lines=10,
+                                                         autoscroll=False, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    chunk_size_text = gr.Textbox(label="チャンク・サイズ(Chunk Size)", lines=1, value="500")
+                with gr.Column():
+                    chunk_overlap_text = gr.Textbox(label="チャンク・オーバーラップ(Chunk Overlap)", lines=1,
+                                                    value="100")
+            with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=[[200, 0], [200, 50], [500, 0], [500, 100]],
+                                inputs=[chunk_size_text, chunk_overlap_text])
+            with gr.Row():
+                with gr.Column():
+                    split_button = gr.Button(value="分割", label="Split", variant="primary")
+
+        with gr.TabItem(label="Step-3.ベクトル・データベースへ保存"):
+            with gr.Row():
+                with gr.Column():
+                    cope_of_first_trunk_content_text = gr.Textbox(label="最初の Chunk 内容", lines=10, max_lines=10,
+                                                                  autoscroll=False, interactive=False)
+                    first_trunk_vector_text = gr.Textbox(label="ベクトル化後の Chunk 内容", lines=10, max_lines=10,
+                                                         autoscroll=False, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    cope_of_last_trunk_content_text = gr.Textbox(label="最後の Chunk 内容", lines=10, max_lines=10,
+                                                                 autoscroll=False, interactive=False)
+                    last_trunk_vector_text = gr.Textbox(label="ベクトル化後の Chunk 内容", lines=10, max_lines=10,
+                                                        autoscroll=False, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    embed_and_save_button = gr.Button(value="ベクトル化して保存", label="embed_and_save",
+                                                      variant="primary")
+
+        with gr.TabItem(label="Step-4.ドキュメントとチャット"):
+            with gr.Row():
+                with gr.Column():
+                    answer2_dataframe = gr.Dataframe(
+                        headers=["ページ・コンテンツ", "ソース"],
+                        datatype=["str", "str"],
+                        row_count=5,
+                        col_count=(2, "fixed"),
+                    )
+            with gr.Row():
+                with gr.Column():
+                    answer2_text = gr.Textbox(label="回答", lines=15, max_lines=15,
+                                              autoscroll=False, interactive=False, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    question2_text = gr.Textbox(label="質問", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=["このドラマのストーリーを教えてください",
+                                          "鈴木保奈美さんの作品を教えてください"],
+                                inputs=question2_text)
+            with gr.Row():
+                with gr.Column():
+                    chat_document_button = gr.Button(value="送信", label="chat_document", variant="primary")
+
+        chat_button.click(chat_stream,
+                          inputs=[question1_text],
+                          outputs=[answer1_text])
+
+        load_button.click(load_document,
+                          inputs=[web_page_url_text],
+                          outputs=[page_count_text, page_content_text],
+                          )
+
+        split_button.click(split_document,
+                           inputs=[chunk_size_text, chunk_overlap_text],
+                           outputs=[chunk_count_text, first_trunk_content_text, last_trunk_content_text,
+                                    cope_of_first_trunk_content_text, cope_of_last_trunk_content_text],
+                           )
+
+        embed_and_save_button.click(embed_document,
+                                    inputs=[cope_of_first_trunk_content_text, cope_of_last_trunk_content_text],
+                                    outputs=[first_trunk_vector_text, last_trunk_vector_text],
+                                    )
+
+        chat_document_button.click(chat_document_stream,
+                                   inputs=[question2_text],
+                                   outputs=[answer2_dataframe, answer2_text])
+
+app.queue()
+if __name__ == "__main__":
+    app.launch(server_name="0.0.0.0", server_port=7860)
