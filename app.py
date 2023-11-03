@@ -10,7 +10,8 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain.chat_models import ChatOpenAI
 # from langchain.embeddings import OpenAIEmbeddings
-from langchain.embeddings import CohereEmbeddings
+# from langchain.embeddings import CohereEmbeddings
+from mylangchain.embeddings import CohereEmbeddings
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.prompts import PromptTemplate
@@ -26,11 +27,18 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 openai.api_base = os.environ['OPENAI_API_BASE']
 
 persist_directory = './docs/chroma/'
-embedding = CohereEmbeddings(model="embed-multilingual-v2.0")
+"""
+"search_document": Use this when you encode documents for embeddings that you store in a vector database for search use-cases.
+"search_query": Use this when you query your vector DB to find relevant documents.
+"classification": Use this when you use the embeddings as an input to a text classifier.
+"clustering": Use this when you want to cluster the embeddings.
+"""
+embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
+embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
 
 
 def chat_stream(question1_text):
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
     messages = [
         SystemMessage(
             content="You are a helpful assistant."
@@ -87,12 +95,22 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     The most common way to do this is to embed the contents of each document split.
     We store the embedding and splits in a vectorstore.
     """
-    first_trunk_vector_text = embedding.embed_documents([cope_of_first_trunk_content_text])
-    last_trunk_vector_text = embedding.embed_documents([cope_of_last_trunk_content_text])
-    vectorstore = Chroma.from_documents(persist_directory=persist_directory,
-                                        collection_name="docs",
-                                        documents=all_splits,
-                                        embedding=embedding)
+    first_trunk_vector_text = embedding_search_document.embed_documents([cope_of_first_trunk_content_text])
+    last_trunk_vector_text = embedding_search_document.embed_documents([cope_of_last_trunk_content_text])
+    if os.path.exists(persist_directory):
+        if len(os.listdir(persist_directory)) > 0:
+            for root, dirs, files in os.walk(persist_directory, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+            os.rmdir(persist_directory)
+        else:
+            os.rmdir(persist_directory)
+    Chroma.from_documents(persist_directory=persist_directory,
+                          collection_name="docs",
+                          documents=all_splits,
+                          embedding=embedding_search_document)
     # print(f"vectorstore: {vectorstore}")
 
     return gr.Textbox(value=first_trunk_vector_text), gr.Textbox(value=last_trunk_vector_text)
@@ -104,15 +122,14 @@ def chat_document_stream(question2_text):
     This is simply "top K" retrieval where we select documents based on embedding similarity to the query.
     """
     vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
-                         embedding_function=embedding)
+                         embedding_function=embedding_search_query)
     docs_dataframe = []
     docs = vectorstore.similarity_search(question2_text)
-    print(f"len(docs): {len(docs)}")
+    # print(f"len(docs): {len(docs)}")
     for doc in docs:
-        print(f"doc: {doc}")
+        # print(f"doc: {doc}")
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
     template = """Use the following pieces of context to answer the question at the end. 
     If you don't know the answer, just say that you don't know, don't try to make up an answer. 
     Use three sentences maximum and keep the answer as concise as possible. 

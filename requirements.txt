@@ -11,7 +11,8 @@ python-multipart==0.0.6
 gradio==3.50.2
 python-dotenv==1.0.0
 curl_cffi==0.5.10b3
--e git+https://github.com/engchina/oci-cohere-python.git@main#egg=cohere
+# -e git+https://github.com/engchina/oci-cohere-python.git@main#egg=cohere
+cohere
 openai==0.28.1
 bs4==0.0.1
 chromadb==0.4.15
