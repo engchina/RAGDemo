@@ -4,14 +4,14 @@ import sys
 from dotenv import load_dotenv, find_dotenv
 
 # from curl_cffi import requests
-from langchain.document_loaders import WebBaseLoader
+from langchain.document_loaders import WebBaseLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from langchain.vectorstores import Chroma
 from langchain.chat_models import ChatOpenAI
-# from langchain.embeddings import OpenAIEmbeddings
+from langchain.embeddings import OpenAIEmbeddings
 # from langchain.embeddings import CohereEmbeddings
-from mylangchain.embeddings import CohereEmbeddings
+# from mylangchain.embeddings import CohereEmbeddings
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.prompts import PromptTemplate
@@ -33,8 +33,10 @@ persist_directory = './docs/chroma/'
 "classification": Use this when you use the embeddings as an input to a text classifier.
 "clustering": Use this when you want to cluster the embeddings.
 """
-embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
-embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+# embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
+# embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+embedding_search_document = OpenAIEmbeddings()
+embedding_search_query = OpenAIEmbeddings()
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
 
 
@@ -52,13 +54,18 @@ def chat_stream(question1_text):
     return gr.Textbox(result.content)
 
 
-def load_document(web_page_url_text):
-    gr.Markdown(visible=False)
+def load_document(web_page_url_text, file_text):
     """
     Specify a DocumentLoader to load in your unstructured data as Documents.
     A Document is a dict with text (page_content) and metadata.
     """
-    loader = WebBaseLoader(web_page_url_text)
+    if web_page_url_text == "http://" or web_page_url_text == "https://":
+        loader = WebBaseLoader(web_page_url_text)
+    else:
+        loader = TextLoader(file_text.name)
+
+    print(f"file_text: {file_text}")
+    print(f"type(file_text): {type(file_text)}")
     global data
     data = loader.load()
     # print(f"data: {data}")
@@ -164,8 +171,10 @@ with gr.Blocks() as app:
                     question1_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["このドラマのストーリーを教えてください",
-                                          "鈴木保奈美さんの作品を教えてください"],
+                    gr.Examples(examples=["鈴木保奈美さんの誕生日を教えてください",
+                                          "鈴木保奈美さんの身長を教えてください",
+                                          "鈴木保奈美さんの主な作品を教えてください"
+                                          ],
                                 inputs=question1_text)
             with gr.Row():
                 with gr.Column():
@@ -181,15 +190,21 @@ with gr.Blocks() as app:
                                                    show_copy_button=True)
             with gr.Row():
                 with gr.Column():
-                    web_page_url_text = gr.Textbox(label="ウェブページ URL", lines=1,
-                                                   value="https://ja.wikipedia.org/wiki/東京ラブストーリー")
+                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
+                with gr.Column():
+                    file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
             with gr.Row():
                 with gr.Column():
                     gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
                                           "https://ja.wikipedia.org/wiki/ニュースの女",
                                           "https://ja.wikipedia.org/wiki/愛という名のもとに",
                                           "https://ja.wikipedia.org/wiki/鈴木保奈美"],
+                                label="ウェブ・ページ事例",
                                 inputs=web_page_url_text)
+                with gr.Column():
+                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/suzukihonami.txt")],
+                                label="ファイル事例",
+                                inputs=file_text)
             with gr.Row():
                 with gr.Column():
                     load_button = gr.Button(value="ロード", label="load", variant="primary")
@@ -256,8 +271,9 @@ with gr.Blocks() as app:
                     question2_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["このドラマのストーリーを教えてください",
-                                          "鈴木保奈美さんの作品を教えてください"],
+                    gr.Examples(examples=["鈴木保奈美さんの誕生日を教えてください",
+                                          "鈴木保奈美さんの身長を教えてください",
+                                          "鈴木保奈美さんの主な作品を教えてください"],
                                 inputs=question2_text)
             with gr.Row():
                 with gr.Column():
@@ -268,7 +284,7 @@ with gr.Blocks() as app:
                           outputs=[answer1_text])
 
         load_button.click(load_document,
-                          inputs=[web_page_url_text],
+                          inputs=[web_page_url_text if web_page_url_text is not None else "http://", file_text],
                           outputs=[page_count_text, page_content_text],
                           )
 
