@@ -54,18 +54,16 @@ def chat_stream(question1_text):
     return gr.Textbox(result.content)
 
 
-def load_document(web_page_url_text, file_text):
+def load_document(file_text, web_page_url_text):
     """
     Specify a DocumentLoader to load in your unstructured data as Documents.
     A Document is a dict with text (page_content) and metadata.
     """
-    if web_page_url_text == "http://" or web_page_url_text == "https://":
-        loader = WebBaseLoader(web_page_url_text)
-    else:
+    if web_page_url_text == "" or web_page_url_text is None:
         loader = TextLoader(file_text.name)
+    else:
+        loader = WebBaseLoader(web_page_url_text)
 
-    print(f"file_text: {file_text}")
-    print(f"type(file_text): {type(file_text)}")
     global data
     data = loader.load()
     # print(f"data: {data}")
@@ -82,7 +80,7 @@ def split_document(chunk_size_text, chunk_overlap_text):
     """
     Split the Document into chunks for embedding and vector storage.
     """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=0)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=int(chunk_size_text), chunk_overlap=int(chunk_overlap_text))
 
     global data, all_splits
     all_splits = text_splitter.split_documents(data)
@@ -190,10 +188,14 @@ with gr.Blocks() as app:
                                                    show_copy_button=True)
             with gr.Row():
                 with gr.Column():
-                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
-                with gr.Column():
                     file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
+                with gr.Column():
+                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
             with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/suzukihonami.txt")],
+                                label="ファイル事例",
+                                inputs=file_text)
                 with gr.Column():
                     gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
                                           "https://ja.wikipedia.org/wiki/ニュースの女",
@@ -201,10 +203,7 @@ with gr.Blocks() as app:
                                           "https://ja.wikipedia.org/wiki/鈴木保奈美"],
                                 label="ウェブ・ページ事例",
                                 inputs=web_page_url_text)
-                with gr.Column():
-                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/suzukihonami.txt")],
-                                label="ファイル事例",
-                                inputs=file_text)
+
             with gr.Row():
                 with gr.Column():
                     load_button = gr.Button(value="ロード", label="load", variant="primary")
@@ -229,7 +228,7 @@ with gr.Blocks() as app:
                                                     value="100")
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=[[200, 0], [200, 50], [500, 0], [500, 100]],
+                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100]],
                                 inputs=[chunk_size_text, chunk_overlap_text])
             with gr.Row():
                 with gr.Column():
@@ -284,7 +283,7 @@ with gr.Blocks() as app:
                           outputs=[answer1_text])
 
         load_button.click(load_document,
-                          inputs=[web_page_url_text if web_page_url_text is not None else "http://", file_text],
+                          inputs=[file_text, web_page_url_text],
                           outputs=[page_count_text, page_content_text],
                           )
 
