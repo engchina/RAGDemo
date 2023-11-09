@@ -44,7 +44,7 @@ embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
 
 # PGVector needs the connection string to the database.
-CONNECTION_STRING = "postgresql+psycopg2://username:password@localhost:5432/postgres"
+CONNECTION_STRING = os.environ["CONNECTION_STRING"]
 
 
 def chat_stream(question1_text):
