@@ -17,3 +17,5 @@ openai==0.28.1
 bs4==0.0.1
 chromadb==0.4.15
 tiktoken==0.5.1
+pgvector==0.2.3
+psycopg2-binary==2.9.9

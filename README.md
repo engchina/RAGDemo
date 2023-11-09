@@ -28,3 +28,25 @@ python app.py
 ```
 
 ブラウザーで [http://localhost:7860](http://localhost:7860) を開いて、アクセスしてください。
+
+refer: [https://python.langchain.com/docs/use_cases/question_answering/](https://python.langchain.com/docs/use_cases/question_answering/)
+
+
+## （Optional） PGVector
+
+PGVector の起動、
+
+```
+mkdir -p /root/pg/data; chmod 777 /root/pg/data
+docker run --name pgvector --restart=always -p 5432:5432 -v /root/pg/data:/var/lib/postgresql/data -e POSTGRES_USER=username -e POSTGRES_PASSWORD=password -e POSTGRES_DB=postgres -d ankane/pgvector:v0.5.1
+```
+
+データベースの作成、
+
+```
+docker exec -it pgvector bash
+psql -U username -d postgres
+CREATE DATABASE ragdemo;
+```
+
+[pgvector document](https://github.com/pgvector/pgvector)

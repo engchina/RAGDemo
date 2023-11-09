@@ -11,12 +11,14 @@ from langchain.vectorstores import Chroma
 from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.embeddings import CohereEmbeddings
-# from mylangchain.embeddings import CohereEmbeddings
+from mylangchain.embeddings import CohereEmbeddings
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.prompts import PromptTemplate
+from langchain.tools import tool
 
 import gradio as gr
+from langchain.vectorstores.pgvector import PGVector
 
 sys.path.append('../..')
 
@@ -25,6 +27,8 @@ _ = load_dotenv(find_dotenv())
 
 openai.api_key = os.environ['OPENAI_API_KEY']
 openai.api_base = os.environ['OPENAI_API_BASE']
+os.environ["LANGCHAIN_API_KEY"] = os.environ["LANGCHAIN_API_KEY"]
+os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
 persist_directory = './docs/chroma/'
 """
@@ -33,11 +37,14 @@ persist_directory = './docs/chroma/'
 "classification": Use this when you use the embeddings as an input to a text classifier.
 "clustering": Use this when you want to cluster the embeddings.
 """
-# embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
-# embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
-embedding_search_document = OpenAIEmbeddings()
-embedding_search_query = OpenAIEmbeddings()
+embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
+embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+# embedding_search_document = OpenAIEmbeddings()
+# embedding_search_query = OpenAIEmbeddings()
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+
+# PGVector needs the connection string to the database.
+CONNECTION_STRING = "postgresql+psycopg2://username:password@localhost:5432/postgres"
 
 
 def chat_stream(question1_text):
@@ -80,7 +87,8 @@ def split_document(chunk_size_text, chunk_overlap_text):
     """
     Split the Document into chunks for embedding and vector storage.
     """
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=int(chunk_size_text), chunk_overlap=int(chunk_overlap_text))
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=int(chunk_size_text),
+                                                   chunk_overlap=int(chunk_overlap_text))
 
     global data, all_splits
     all_splits = text_splitter.split_documents(data)
@@ -112,46 +120,69 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
             os.rmdir(persist_directory)
         else:
             os.rmdir(persist_directory)
-    Chroma.from_documents(persist_directory=persist_directory,
-                          collection_name="docs",
-                          documents=all_splits,
-                          embedding=embedding_search_document)
+    # Use Chroma
+    # Chroma.from_documents(persist_directory=persist_directory,
+    #                       collection_name="docs",
+    #                       documents=all_splits,
+    #                       embedding=embedding_search_document)
+    # Use PGVector
+    PGVector.from_documents(
+        embedding=embedding_search_document,
+        documents=all_splits,
+        collection_name="docs",
+        connection_string=CONNECTION_STRING,
+        pre_delete_collection=True,  # Overriding a vectorstore
+    )
     # print(f"vectorstore: {vectorstore}")
 
     return gr.Textbox(value=first_trunk_vector_text), gr.Textbox(value=last_trunk_vector_text)
 
 
+@tool
 def chat_document_stream(question2_text):
     """
     Retrieve relevant splits for any question using similarity search.
     This is simply "top K" retrieval where we select documents based on embedding similarity to the query.
     """
-    vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
-                         embedding_function=embedding_search_query)
+    # Use Chroma
+    # vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
+    #                      embedding_function=embedding_search_query)
+    # Use PGVector
+    vectorstore = PGVector(connection_string=CONNECTION_STRING,
+                           collection_name="docs",
+                           embedding_function=embedding_search_query,
+                           )
     docs_dataframe = []
-    docs = vectorstore.similarity_search(question2_text)
+    docs = vectorstore.similarity_search_with_score(question2_text)
     # print(f"len(docs): {len(docs)}")
-    for doc in docs:
+    for doc, score in docs:
         # print(f"doc: {doc}")
+        # print("Score: ", score)
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
     template = """Use the following pieces of context to answer the question at the end. 
-    If you don't know the answer, just say that you don't know, don't try to make up an answer. 
-    Use three sentences maximum and keep the answer as concise as possible. 
-    Always say "thanks for asking!" at the end of the answer. 
+    If you don't know the answer, just say that you don't know, don't try to make up an answer.
+    Use ten sentences maximum and keep the answer as concise as possible.
+    Don't try to answer anything that isn't in context.  
     {context}
     Question: {question}
     Helpful Answer:"""
     rag_prompt_custom = PromptTemplate.from_template(template)
-    retriever = vectorstore.as_retriever()
+    # Method-1
+    # retriever = vectorstore.as_retriever()
+    #
+    # rag_chain = (
+    #         {"context": retriever, "question": RunnablePassthrough()} | rag_prompt_custom | llm
+    # )
+    #
+    # result = rag_chain.invoke(question2_text)
+    # # print(result)
+    #
+    # return gr.Dataframe(value=docs_dataframe), gr.Textbox(result.content)
 
-    rag_chain = (
-            {"context": retriever, "question": RunnablePassthrough()} | rag_prompt_custom | llm
-    )
-
-    result = rag_chain.invoke(question2_text)
-    print(result)
-
+    # Method-2
+    message = rag_prompt_custom.format_prompt(context=docs, question=question2_text)
+    result = llm(message.to_messages())
     return gr.Dataframe(value=docs_dataframe), gr.Textbox(result.content)
 
 
@@ -170,7 +201,7 @@ with gr.Blocks() as app:
             with gr.Row():
                 with gr.Column():
                     gr.Examples(examples=["鈴木保奈美さんの誕生日を教えてください",
-                                          "鈴木保奈美さんの身長を教えてください",
+                                          "鈴木保奈美さんの出身を教えてください",
                                           "鈴木保奈美さんの主な作品を教えてください"
                                           ],
                                 inputs=question1_text)
@@ -199,8 +230,8 @@ with gr.Blocks() as app:
                 with gr.Column():
                     gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
                                           "https://ja.wikipedia.org/wiki/ニュースの女",
-                                          "https://ja.wikipedia.org/wiki/愛という名のもとに",
-                                          "https://ja.wikipedia.org/wiki/鈴木保奈美"],
+                                          "https://ja.wikipedia.org/wiki/鈴木保奈美",
+                                          "https://ja.wikipedia.org/wiki/木村拓哉"],
                                 label="ウェブ・ページ事例",
                                 inputs=web_page_url_text)
 
@@ -271,7 +302,7 @@ with gr.Blocks() as app:
             with gr.Row():
                 with gr.Column():
                     gr.Examples(examples=["鈴木保奈美さんの誕生日を教えてください",
-                                          "鈴木保奈美さんの身長を教えてください",
+                                          "鈴木保奈美さんの出身を教えてください",
                                           "鈴木保奈美さんの主な作品を教えてください"],
                                 inputs=question2_text)
             with gr.Row():
