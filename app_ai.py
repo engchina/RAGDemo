@@ -1,13 +1,12 @@
 import os
+from typing import List
+
 import openai
 import sys
-
-import pandas as pd
 from dotenv import load_dotenv, find_dotenv
 
 # from curl_cffi import requests
-# from langchain.document_loaders import WebBaseLoader, TextLoader, PyMuPDFLoader
-from langchain.document_loaders import WebBaseLoader, PyMuPDFLoader
+from langchain.document_loaders import WebBaseLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from langchain.vectorstores import Chroma
@@ -15,13 +14,16 @@ from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.embeddings import CohereEmbeddings
 from mylangchain.embeddings import CohereEmbeddings
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.schema import AIMessage, HumanMessage, SystemMessage, Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.prompts import PromptTemplate
 from langchain.tools import tool
 
 import gradio as gr
 from langchain.vectorstores.pgvector import PGVector
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 sys.path.append('../..')
 
@@ -49,6 +51,12 @@ llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
 # PGVector needs the connection string to the database.
 CONNECTION_STRING = os.environ["CONNECTION_STRING"]
 
+ORACLE_DB_CONNECT_STRING = os.environ['ORACLE_DB_CONNECT_STRING']
+
+# print(sqlalchemy.__version__)
+# 创建引擎
+engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
+
 
 def chat_stream(question1_text):
     messages = [
@@ -64,33 +72,121 @@ def chat_stream(question1_text):
     return gr.Textbox(result.content)
 
 
+def save_report(employee_name_text, task_report_text):
+    insert_stmt = text(
+        "INSERT INTO daily_task_report (employee_name, task_report) VALUES (:employee_name, :task_report)")
+
+    with Session(engine) as session:
+        try:
+            result = session.execute(insert_stmt,
+                                     {"employee_name": employee_name_text, "task_report": task_report_text})
+            print(f"========= {result.rowcount} rows inserted. =========")
+            session.commit()
+        except Exception as e:
+            print(f"=========\n {e} \n=========")
+            session.rollback()
+
+    return gr.Textbox(value="保存しました", visible=True)
+
+
+def load_document_from_db():
+    """
+    Specify a DocumentLoader to load in your unstructured data as Documents.
+    A Document is a dict with text (page_content) and metadata.
+    """
+    documents: List[Document] = []
+    # select_stmt = text("SELECT employee_name, task_report FROM daily_task_report")
+    sql = """
+WITH ucc AS (
+    SELECT
+        column_name,
+        comments
+    FROM
+        user_col_comments
+    WHERE
+        table_name = 'DAILY_TASK_REPORT'
+)
+SELECT
+    (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'EMPLOYEE_NAME'
+    )
+    || ':'
+    || main.employee_name
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'TASK_REPORT'
+    )
+    || ':'
+    || main.task_report AS main_data
+FROM
+    (
+        SELECT
+            employee_name,
+            task_report
+        FROM
+            daily_task_report
+    ) main
+"""
+    select_stmt = text(sql)
+    with Session(engine) as session:
+        try:
+            result = session.execute(select_stmt)
+            for row in result:
+                # document = Document(page_content=f"{row.employee_name}: {row.task_report}",
+                #                     metadata={"source": "Oracle データベース"})
+                document = Document(page_content=f"{row.main_data} \n\n",
+                                    metadata={"source": "Oracle データベース"})
+                documents.append(document)
+            session.commit()
+        except Exception as e:
+            print(f"=========\n {e} \n=========")
+            session.rollback()
+
+    global data
+    data = documents
+    print(f"data: {data}")
+    page_count = len(data)
+    for doc in data:
+        page_content_text = doc.page_content
+        while "\n\n" in page_content_text:
+            page_content_text = page_content_text.replace("\n\n", "\n")
+        doc.page_content = page_content_text
+
+    doc_str = '\n'.join(str(doc.page_content) for doc in documents)
+
+    return gr.Textbox(value=str(page_count)), gr.Textbox(value=doc_str)
+
+
 def load_document(file_text, web_page_url_text):
     """
     Specify a DocumentLoader to load in your unstructured data as Documents.
     A Document is a dict with text (page_content) and metadata.
     """
     if web_page_url_text == "" or web_page_url_text is None:
-        loader = PyMuPDFLoader(file_text.name)
+        loader = TextLoader(file_text.name)
     else:
         loader = WebBaseLoader(web_page_url_text)
 
     global data
     data = loader.load()
     # print(f"data: {data}")
-    all_page_content_text = ""
     page_count = len(data)
-    for i in range(page_count):
-        page_content_text = data[i].page_content
-        while "\n\n" in page_content_text:
-            page_content_text = page_content_text.replace("\n\n", "=" * 20)
-        while "\n" in page_content_text:
-            page_content_text = page_content_text.replace("\n", " ")
-        while "=" * 20 in page_content_text:
-            page_content_text = page_content_text.replace("=" * 20, "\n")
-        data[i].page_content = page_content_text
-        all_page_content_text += "\n\n" + page_content_text
+    page_content_text = data[0].page_content
+    while "\n\n" in page_content_text:
+        page_content_text = page_content_text.replace("\n\n", "\n")
+    data[0].page_content = page_content_text
 
-    return gr.Textbox(value=str(page_count)), gr.Textbox(value=all_page_content_text)
+    return gr.Textbox(value=str(page_count)), gr.Textbox(value=page_content_text)
 
 
 def split_document(chunk_size_text, chunk_overlap_text):
@@ -193,14 +289,14 @@ def chat_document_stream(question2_text):
     # Method-2
     message = rag_prompt_custom.format_prompt(context=docs, question=question2_text)
     result = llm(message.to_messages())
-    return gr.Dataframe(value=docs_dataframe, wrap=True, column_widths=["20%", "80%"]), gr.Textbox(result.content)
+    return gr.Dataframe(value=docs_dataframe), gr.Textbox(result.content)
 
 
 with gr.Blocks() as app:
     gr.Markdown(value="# RAG デモ")
 
     with gr.Tabs() as tabs:
-        with gr.TabItem(label="Step-0.チャット"):
+        with gr.TabItem(label="Step--1.チャット"):
             with gr.Row():
                 with gr.Column():
                     answer1_text = gr.Textbox(label="回答", lines=15, max_lines=15,
@@ -210,13 +306,39 @@ with gr.Blocks() as app:
                     question1_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["チップ接合耐久性と放熱性の両方を実現するために有用な素材は何ですか？",
-                                          "1エリア1方向加工を実現するための課題と解決策は何ですか？"
+                    gr.Examples(examples=["東京太郎は何台の車を製造しましたか？",
+                                          "大阪太郎は何台の車を製造しましたか？",
+                                          "鈴木保奈美さんの誕生日を教えてください",
+                                          "鈴木保奈美さんの出身を教えてください",
+                                          "鈴木保奈美さんの主な作品を教えてください",
                                           ],
                                 inputs=question1_text)
             with gr.Row():
                 with gr.Column():
                     chat_button = gr.Button(value="送信", label="chat", variant="primary")
+
+        with gr.TabItem(label="Step-0.作業日報"):
+            with gr.Row():
+                with gr.Column():
+                    save_message_text = gr.Textbox(show_label=False, visible=False)
+            with gr.Row():
+                with gr.Column():
+                    employee_name_text = gr.Textbox(label="名前", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    task_report_text = gr.Textbox(label="作業", lines=15, max_lines=15,
+                                                  autoscroll=False, interactive=True, show_copy_button=True)
+            with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=[["東京太郎", "2023年11月10日は5台車を製造しました。"],
+                                          ["大阪太郎", "2023年11月10日は6台車を製造しました。"],
+                                          ["京都太郎", "2023年11月10日は7台車を製造しました。"],
+                                          ["北海道太郎", "2023年11月10日は8台車を製造しました。"],
+                                          ["奈良太郎", "2023年11月10日は9台車を製造しました。"]],
+                                inputs=[employee_name_text, task_report_text])
+            with gr.Row():
+                with gr.Column():
+                    save_report_button = gr.Button(value="保存", label="save", variant="primary")
 
         with gr.TabItem(label="Step-1.ドキュメントのロード"):
             with gr.Row():
@@ -228,17 +350,19 @@ with gr.Blocks() as app:
                                                    show_copy_button=True)
             with gr.Row():
                 with gr.Column():
-                    # file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
-                    file_text = gr.File(label="ファイル", file_types=[".pdf"], type="file")
-                with gr.Column(visible=False):
-                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
-            with gr.Row():
+                    load_from_db_button = gr.Button(value="DBからロード", label="load_from_db", variant="primary")
+
+            with gr.Row(visible=False):
                 with gr.Column():
-                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/2203103.pdf"),
-                                          os.path.join(os.path.dirname(__file__), "files/2020_no012.pdf")],
+                    file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
+                with gr.Column():
+                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
+            with gr.Row(visible=False):
+                with gr.Column():
+                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/suzukihonami.txt")],
                                 label="ファイル事例",
                                 inputs=file_text)
-                with gr.Column(visible=False):
+                with gr.Column():
                     gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
                                           "https://ja.wikipedia.org/wiki/ニュースの女",
                                           "https://ja.wikipedia.org/wiki/鈴木保奈美",
@@ -246,7 +370,7 @@ with gr.Blocks() as app:
                                 label="ウェブ・ページ事例",
                                 inputs=web_page_url_text)
 
-            with gr.Row():
+            with gr.Row(visible=False):
                 with gr.Column():
                     load_button = gr.Button(value="ロード", label="load", variant="primary")
 
@@ -270,7 +394,7 @@ with gr.Blocks() as app:
                                                     value="100")
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100], [1000, 200]],
+                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100]],
                                 inputs=[chunk_size_text, chunk_overlap_text])
             with gr.Row():
                 with gr.Column():
@@ -302,7 +426,6 @@ with gr.Blocks() as app:
                         datatype=["str", "str"],
                         row_count=5,
                         col_count=(2, "fixed"),
-                        wrap=True,
                     )
             with gr.Row():
                 with gr.Column():
@@ -313,9 +436,11 @@ with gr.Blocks() as app:
                     question2_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["チップ接合耐久性と放熱性の両方を実現するために有用な素材は何ですか？",
-                                          "1エリア1方向加工を実現するための課題と解決策は何ですか？"
-                                          ],
+                    gr.Examples(examples=["東京太郎は何台の車を製造しましたか？",
+                                          "大阪太郎は何台の車を製造しましたか？",
+                                          "鈴木保奈美さんの誕生日を教えてください",
+                                          "鈴木保奈美さんの出身を教えてください",
+                                          "鈴木保奈美さんの主な作品を教えてください"],
                                 inputs=question2_text)
             with gr.Row():
                 with gr.Column():
@@ -324,6 +449,15 @@ with gr.Blocks() as app:
         chat_button.click(chat_stream,
                           inputs=[question1_text],
                           outputs=[answer1_text])
+
+        save_report_button.click(save_report,
+                                 inputs=[employee_name_text, task_report_text],
+                                 outputs=[save_message_text])
+
+        load_from_db_button.click(load_document_from_db,
+                                  inputs=[],
+                                  outputs=[page_count_text, page_content_text],
+                                  )
 
         load_button.click(load_document,
                           inputs=[file_text, web_page_url_text],
