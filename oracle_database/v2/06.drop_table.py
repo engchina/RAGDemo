@@ -17,17 +17,14 @@ engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
 
 with engine.connect() as conn:
     try:
-        result = conn.execute(text("CREATE TABLE daily_task_report (employee_name varchar2(50), task_report varchar2(2000))"))
+        result = conn.execute(text("DROP TABLE employee"))
         # print(result.rowcount)
-
         if result.rowcount == 0:
-            print("========= create table successfully =========")
+            print("========= drop table successfully =========")
             conn.commit()
         else:
-            print("========= create table failed =========")
+            print("========= drop table failed =========")
             conn.rollback()
     except Exception as e:
         print(f"=========\n {e} \n=========")
         conn.rollback()
-
-

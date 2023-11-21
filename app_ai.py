@@ -32,6 +32,7 @@ _ = load_dotenv(find_dotenv())
 
 openai.api_key = os.environ['OPENAI_API_KEY']
 openai.api_base = os.environ['OPENAI_API_BASE']
+llm_model = os.environ['LLM_MODEL']
 os.environ["LANGCHAIN_API_KEY"] = os.environ["LANGCHAIN_API_KEY"]
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
@@ -46,7 +47,7 @@ embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", in
 embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
 # embedding_search_document = OpenAIEmbeddings()
 # embedding_search_query = OpenAIEmbeddings()
-llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+llm = ChatOpenAI(model_name=llm_model, temperature=0)
 
 # PGVector needs the connection string to the database.
 CONNECTION_STRING = os.environ["CONNECTION_STRING"]
@@ -58,7 +59,32 @@ ORACLE_DB_CONNECT_STRING = os.environ['ORACLE_DB_CONNECT_STRING']
 engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
 
 
-def chat_stream(question1_text):
+def login(username, password):
+    """Custom authentication."""
+    # ToDo: Fetch Access Oracle
+    if username == "admin" and password == "123456":
+        set_user_info(username, "admin")
+        return True, username
+    if (username == "user1" or username == "user2") and password == "123456":
+        set_user_info(username, "user")
+        return True, username
+    return False, username
+
+
+def set_user_info(username, role):
+    global user_info
+    user_info = {"username": username, "role": role}
+
+
+def get_user_info():
+    global user_info
+    return user_info
+
+
+def chat_stream(question1_text, request: gr.Request):
+    print(f"username: {request.username}")
+    user_info = get_user_info()
+    print(f"user_info: {user_info}")
     messages = [
         SystemMessage(
             content="You are a helpful assistant."
@@ -198,7 +224,6 @@ def split_document(chunk_size_text, chunk_overlap_text):
 
     global data, all_splits
     all_splits = text_splitter.split_documents(data)
-    # print(f"all_splits: {all_splits}")
     chunk_count_text = len(all_splits)
     first_trunk_content_text = all_splits[0].page_content
     last_trunk_content_text = all_splits[-1].page_content
@@ -208,7 +233,8 @@ def split_document(chunk_size_text, chunk_overlap_text):
         value=last_trunk_content_text)
 
 
-def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_text):
+def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_text, role_radio_text,
+                   create_or_add_radio_text):
     """
     To be able to look up our document splits, we first need to store them where we can later look them up.
     The most common way to do this is to embed the contents of each document split.
@@ -216,35 +242,44 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     """
     first_trunk_vector_text = embedding_search_document.embed_documents([cope_of_first_trunk_content_text])
     last_trunk_vector_text = embedding_search_document.embed_documents([cope_of_last_trunk_content_text])
-    if os.path.exists(persist_directory):
-        if len(os.listdir(persist_directory)) > 0:
-            for root, dirs, files in os.walk(persist_directory, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(persist_directory)
-        else:
-            os.rmdir(persist_directory)
+    print(f"all_splits: {all_splits}")
+    for doc in all_splits:
+        doc.metadata["role"] = role_radio_text
+    print(f"all_splits: {all_splits}")
     # Use Chroma
+    # if os.path.exists(persist_directory):
+    #     if len(os.listdir(persist_directory)) > 0:
+    #         for root, dirs, files in os.walk(persist_directory, topdown=False):
+    #             for name in files:
+    #                 os.remove(os.path.join(root, name))
+    #             for name in dirs:
+    #                 os.rmdir(os.path.join(root, name))
+    #         os.rmdir(persist_directory)
+    #     else:
+    #         os.rmdir(persist_directory)
     # Chroma.from_documents(persist_directory=persist_directory,
     #                       collection_name="docs",
     #                       documents=all_splits,
     #                       embedding=embedding_search_document)
     # Use PGVector
+    if create_or_add_radio_text == "new":
+        pre_delete_collection = True
+    else:
+        pre_delete_collection = False
+
     PGVector.from_documents(
         embedding=embedding_search_document,
         documents=all_splits,
-        # collection_name="docs",
+        collection_name="docs_ai",
         connection_string=CONNECTION_STRING,
-        pre_delete_collection=True,  # Overriding a vectorstore
+        pre_delete_collection=pre_delete_collection,  # Overriding a vectorstore
     )
     # print(f"vectorstore: {vectorstore}")
 
     return gr.Textbox(value=first_trunk_vector_text), gr.Textbox(value=last_trunk_vector_text)
 
 
-@tool
+# @tool
 def chat_document_stream(question2_text):
     """
     Retrieve relevant splits for any question using similarity search.
@@ -255,18 +290,25 @@ def chat_document_stream(question2_text):
     #                      embedding_function=embedding_search_query)
     # Use PGVector
     vectorstore = PGVector(connection_string=CONNECTION_STRING,
-                           # collection_name="docs",
+                           collection_name="docs_ai",
                            embedding_function=embedding_search_query,
                            )
     docs_dataframe = []
-    docs = vectorstore.similarity_search_with_score(question2_text)
+    user_info = get_user_info()
+    if user_info.get("role") == "user":
+        docs = vectorstore.similarity_search_with_score(question2_text, filter={
+            "role": "user"})
+    else:
+        docs = vectorstore.similarity_search_with_score(question2_text)
     # print(f"len(docs): {len(docs)}")
     for doc, score in docs:
         # print(f"doc: {doc}")
         # print("Score: ", score)
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
-    template = """Use the following pieces of context to answer the question at the end. 
+    template = """
+    Please Answer in Japanese.
+    Use the following pieces of context to answer the question at the end. 
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
     Use ten sentences maximum and keep the answer as concise as possible.
     Don't try to answer anything that isn't in context.  
@@ -289,7 +331,7 @@ def chat_document_stream(question2_text):
     # Method-2
     message = rag_prompt_custom.format_prompt(context=docs, question=question2_text)
     result = llm(message.to_messages())
-    return gr.Dataframe(value=docs_dataframe), gr.Textbox(result.content)
+    return gr.Dataframe(value=docs_dataframe, wrap=True, column_widths=["70%", "30%"]), gr.Textbox(result.content)
 
 
 with gr.Blocks() as app:
@@ -415,6 +457,14 @@ with gr.Blocks() as app:
                                                         autoscroll=False, show_copy_button=True)
             with gr.Row():
                 with gr.Column():
+                    role_radio_text = gr.Radio([("ユーザー", "user"), ("管理者", "admin")], label="閲覧権限",
+                                               value="user")
+            with gr.Row():
+                with gr.Column():
+                    create_or_add_radio_text = gr.Radio([("新規", "create"), ("追加", "add")], label="新規 or 追加",
+                                                        value="add")
+            with gr.Row():
+                with gr.Column():
                     embed_and_save_button = gr.Button(value="ベクトル化して保存", label="embed_and_save",
                                                       variant="primary")
 
@@ -426,6 +476,8 @@ with gr.Blocks() as app:
                         datatype=["str", "str"],
                         row_count=5,
                         col_count=(2, "fixed"),
+                        wrap=True,
+                        column_widths=["70%", "30%"]
                     )
             with gr.Row():
                 with gr.Column():
@@ -471,7 +523,8 @@ with gr.Blocks() as app:
                            )
 
         embed_and_save_button.click(embed_document,
-                                    inputs=[cope_of_first_trunk_content_text, cope_of_last_trunk_content_text],
+                                    inputs=[cope_of_first_trunk_content_text, cope_of_last_trunk_content_text,
+                                            role_radio_text, create_or_add_radio_text],
                                     outputs=[first_trunk_vector_text, last_trunk_vector_text],
                                     )
 
@@ -481,4 +534,4 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=7860)
+    app.launch(server_name="0.0.0.0", server_port=7861, auth=login)

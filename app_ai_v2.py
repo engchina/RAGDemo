@@ -1,13 +1,13 @@
+import copy
 import os
+from typing import List
+
 import openai
 import sys
-
-import pandas as pd
 from dotenv import load_dotenv, find_dotenv
 
 # from curl_cffi import requests
-# from langchain.document_loaders import WebBaseLoader, TextLoader, PyMuPDFLoader
-from langchain.document_loaders import WebBaseLoader, PyMuPDFLoader
+from langchain.document_loaders import WebBaseLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from langchain.vectorstores import Chroma
@@ -15,13 +15,16 @@ from langchain.chat_models import ChatOpenAI
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.embeddings import CohereEmbeddings
 from mylangchain.embeddings import CohereEmbeddings
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.schema import AIMessage, HumanMessage, SystemMessage, Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.prompts import PromptTemplate
 from langchain.tools import tool
 
 import gradio as gr
 from langchain.vectorstores.pgvector import PGVector
+
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 sys.path.append('../..')
 
@@ -50,8 +53,42 @@ llm = ChatOpenAI(model_name=llm_model, temperature=0)
 # PGVector needs the connection string to the database.
 CONNECTION_STRING = os.environ["CONNECTION_STRING"]
 
+ORACLE_DB_CONNECT_STRING = os.environ['ORACLE_DB_CONNECT_STRING']
 
-def chat_stream(question1_text):
+# print(sqlalchemy.__version__)
+# 创建引擎
+engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
+
+
+def login(username, password):
+    """Custom authentication."""
+    sql = text("SELECT name, role FROM employee WHERE name = :name AND password = :password")
+    with Session(engine) as session:
+        try:
+            result = session.execute(sql, {"name": username, "password": password})
+            for row in result:
+                set_user_info(row.name, row.role)
+                return True, row.name
+        except Exception as e:
+            print(f"=========\n {e} \n=========")
+            session.rollback()
+    return False, username
+
+
+def set_user_info(username, role):
+    global user_info
+    user_info = {"username": username, "role": role}
+
+
+def get_user_info():
+    global user_info
+    return user_info
+
+
+def chat_stream(question1_text, request: gr.Request):
+    print(f"username: {request.username}")
+    user_info = get_user_info()
+    print(f"user_info: {user_info}")
     messages = [
         SystemMessage(
             content="You are a helpful assistant."
@@ -65,33 +102,203 @@ def chat_stream(question1_text):
     return gr.Textbox(result.content)
 
 
+def save_report(name_text, department_name_text, hire_date_text, birthday_text, salary_text,
+                address_text, password_text, role_text, vector_flag_text):
+    print({hire_date_text})
+    insert_stmt = text("""
+INSERT INTO employee (name, department_name, hire_date, birthday, salary, address, password, role, vector_flag) 
+VALUES (:name, :department_name, :hire_date,:birthday, :salary, :address, :password, :role, :vector_flag)
+    """)
+
+    with Session(engine) as session:
+        try:
+            session.execute(text("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD'"))
+            result = session.execute(insert_stmt,
+                                     {"name": name_text, "department_name": department_name_text,
+                                      "hire_date": hire_date_text,
+                                      "birthday": birthday_text, "salary": salary_text, "address": address_text,
+                                      "password": password_text, "role": role_text, "vector_flag": vector_flag_text})
+            print(f"========= {result.rowcount} rows inserted. =========")
+            session.commit()
+        except Exception as e:
+            print(f"=========\n {e} \n=========")
+            session.rollback()
+
+    return gr.Textbox(value="保存しました！", visible=True)
+
+
+def load_document_from_db():
+    """
+    Specify a DocumentLoader to load in your unstructured data as Documents.
+    A Document is a dict with text (page_content) and metadata.
+    """
+    documents: List[Document] = []
+    # select_stmt = text("SELECT employee_name, task_report FROM daily_task_report")
+    sql = """
+WITH ucc AS (
+    SELECT
+        column_name,
+        comments
+    FROM
+        user_col_comments
+    WHERE
+        table_name = 'EMPLOYEE'
+)
+SELECT
+    (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'NAME'
+    )
+    || ':'
+    || main.name
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'DEPARTMENT_NAME'
+    )
+    || ':'
+    || main.department_name
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'HIRE_DATE'
+    )
+    || ':'
+    || main.hire_date
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'BIRTHDAY'
+    )
+    || ':'
+    || main.birthday
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'SALARY'
+    )
+    || ':'
+    || main.salary
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'ADDRESS'
+    )
+    || ':'
+    || main.address
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'PASSWORD'
+    )
+    || ':'
+    || main.password
+    || ','
+    || (
+        SELECT
+            comments
+        FROM
+            ucc
+        WHERE
+            column_name = 'ROLE'
+    )
+    || ':'
+    || main.role AS main_data
+FROM
+    (
+        SELECT
+            name,
+            department_name,
+            TO_CHAR(hire_date, 'YYYY-MM-DD') as hire_date,
+            TO_CHAR(birthday, 'YYYY-MM-DD') as birthday,
+            salary,
+            address,
+            password,
+            role
+        FROM
+            employee
+        WHERE
+            vector_flag = 'N'
+    ) main
+"""
+    select_stmt = text(sql)
+    with Session(engine) as session:
+        try:
+            result = session.execute(select_stmt)
+            for row in result:
+                # document = Document(page_content=f"{row.employee_name}: {row.task_report}",
+                #                     metadata={"source": "Oracle データベース"})
+                document = Document(page_content=f"{row.main_data} \n\n",
+                                    metadata={"source": "Oracle データベース"})
+                documents.append(document)
+            session.commit()
+        except Exception as e:
+            print(f"=========\n {e} \n=========")
+            session.rollback()
+
+    global data
+    data = documents
+    print(f"data: {data}")
+    page_count = len(data)
+    for doc in data:
+        page_content_text = doc.page_content
+        while "\n\n" in page_content_text:
+            page_content_text = page_content_text.replace("\n\n", "\n")
+        doc.page_content = page_content_text
+
+    doc_str = '\n'.join(str(doc.page_content) for doc in documents)
+
+    return gr.Textbox(value=str(page_count)), gr.Textbox(value=doc_str)
+
+
 def load_document(file_text, web_page_url_text):
     """
     Specify a DocumentLoader to load in your unstructured data as Documents.
     A Document is a dict with text (page_content) and metadata.
     """
     if web_page_url_text == "" or web_page_url_text is None:
-        loader = PyMuPDFLoader(file_text.name)
+        loader = TextLoader(file_text.name)
     else:
         loader = WebBaseLoader(web_page_url_text)
 
     global data
     data = loader.load()
     # print(f"data: {data}")
-    all_page_content_text = ""
     page_count = len(data)
-    for i in range(page_count):
-        page_content_text = data[i].page_content
-        while "\n\n" in page_content_text:
-            page_content_text = page_content_text.replace("\n\n", "=" * 20)
-        while "\n" in page_content_text:
-            page_content_text = page_content_text.replace("\n", " ")
-        while "=" * 20 in page_content_text:
-            page_content_text = page_content_text.replace("=" * 20, "\n")
-        data[i].page_content = page_content_text
-        all_page_content_text += "\n\n" + page_content_text
+    page_content_text = data[0].page_content
+    while "\n\n" in page_content_text:
+        page_content_text = page_content_text.replace("\n\n", "\n")
+    data[0].page_content = page_content_text
 
-    return gr.Textbox(value=str(page_count)), gr.Textbox(value=all_page_content_text)
+    return gr.Textbox(value=str(page_count)), gr.Textbox(value=page_content_text)
 
 
 def split_document(chunk_size_text, chunk_overlap_text):
@@ -103,7 +310,6 @@ def split_document(chunk_size_text, chunk_overlap_text):
 
     global data, all_splits
     all_splits = text_splitter.split_documents(data)
-    # print(f"all_splits: {all_splits}")
     chunk_count_text = len(all_splits)
     first_trunk_content_text = all_splits[0].page_content
     last_trunk_content_text = all_splits[-1].page_content
@@ -121,6 +327,18 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     """
     first_trunk_vector_text = embedding_search_document.embed_documents([cope_of_first_trunk_content_text])
     last_trunk_vector_text = embedding_search_document.embed_documents([cope_of_last_trunk_content_text])
+    all_splits_for_user = copy.deepcopy(all_splits)
+    print(f"all_splits: {all_splits}")
+    for doc in all_splits:
+        doc.metadata["role"] = "admin"
+    print(f"all_splits: {all_splits}")
+    print(f"all_splits_for_user: {all_splits_for_user}")
+    all_splits_for_user = copy.deepcopy(all_splits)
+    for doc in all_splits_for_user:
+        index = doc.page_content.find("誕生日")
+        doc.page_content = doc.page_content[:index - 1]
+        doc.metadata["role"] = "user"
+    print(f"all_splits_for_user: {all_splits_for_user}")
     # Use Chroma
     # if os.path.exists(persist_directory):
     #     if len(os.listdir(persist_directory)) > 0:
@@ -140,11 +358,29 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     PGVector.from_documents(
         embedding=embedding_search_document,
         documents=all_splits,
-        collection_name="docs_mfg",
+        collection_name="docs_ai_admin",
         connection_string=CONNECTION_STRING,
-        pre_delete_collection=True,  # Overriding a vectorstore
+        pre_delete_collection=False,  # Overriding a vectorstore
+    )
+    PGVector.from_documents(
+        embedding=embedding_search_document,
+        documents=all_splits_for_user,
+        collection_name="docs_ai_user",
+        connection_string=CONNECTION_STRING,
+        pre_delete_collection=False,  # Overriding a vectorstore
     )
     # print(f"vectorstore: {vectorstore}")
+    update_stmt = text("""
+UPDATE employee set vector_flag = 'Y'
+WHERE vector_flag = 'N'
+    """)
+    with Session(engine) as session:
+        try:
+            result = session.execute(update_stmt)
+            session.commit()
+        except Exception as e:
+            print(f"=========\n {e} \n=========")
+            session.rollback()
 
     return gr.Textbox(value=first_trunk_vector_text), gr.Textbox(value=last_trunk_vector_text)
 
@@ -159,23 +395,35 @@ def chat_document_stream(question2_text):
     # vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
     #                      embedding_function=embedding_search_query)
     # Use PGVector
-    vectorstore = PGVector(connection_string=CONNECTION_STRING,
-                           collection_name="docs_mfg",
-                           embedding_function=embedding_search_query,
-                           )
-    docs_dataframe = []
-    docs = vectorstore.similarity_search_with_score(question2_text)
+    user_info = get_user_info()
+    if user_info.get("role") == "admin":
+        vectorstore = PGVector(connection_string=CONNECTION_STRING,
+                               collection_name="docs_ai_admin",
+                               embedding_function=embedding_search_query,
+                               )
+        docs_dataframe = []
+        docs = vectorstore.similarity_search_with_score(question2_text, filter={
+            "role": "admin"})
+    else:
+        vectorstore = PGVector(connection_string=CONNECTION_STRING,
+                               collection_name="docs_ai_user",
+                               embedding_function=embedding_search_query,
+                               )
+        docs_dataframe = []
+        docs = vectorstore.similarity_search_with_score(question2_text, filter={
+            "role": "user"})
     # print(f"len(docs): {len(docs)}")
     for doc, score in docs:
         # print(f"doc: {doc}")
         # print("Score: ", score)
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
+    # Use ten sentences maximum and keep the answer as concise as possible.
     template = """
     Please Answer in Japanese.
     Use the following pieces of context to answer the question at the end. 
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
-    Use ten sentences maximum and keep the answer as concise as possible.
+    Keep the answer as concise as possible.
     Don't try to answer anything that isn't in context.  
     {context}
     Question: {question}
@@ -195,7 +443,7 @@ def chat_document_stream(question2_text):
 
     # Method-2
     message = rag_prompt_custom.format_prompt(context=docs, question=question2_text)
-    print(f"message.to_messages(): {message.to_messages()}")
+    print(f"message: {message}")
     result = llm(message.to_messages())
     return gr.Dataframe(value=docs_dataframe, wrap=True, column_widths=["70%", "30%"]), gr.Textbox(result.content)
 
@@ -204,7 +452,7 @@ with gr.Blocks() as app:
     gr.Markdown(value="# RAG デモ")
 
     with gr.Tabs() as tabs:
-        with gr.TabItem(label="Step-0.チャット"):
+        with gr.TabItem(label="Step--1.チャット"):
             with gr.Row():
                 with gr.Column():
                     answer1_text = gr.Textbox(label="回答", lines=15, max_lines=15,
@@ -214,13 +462,62 @@ with gr.Blocks() as app:
                     question1_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["チップ接合耐久性と放熱性の両方を実現するために有用な素材は何ですか？",
-                                          "1エリア1方向加工を実現するための課題と解決策は何ですか？"
+                    gr.Examples(examples=["東京太郎の部署を教えてください。",
+                                          "大阪太郎の部署を教えてください。",
+                                          "東京太郎の給料を教えてください。",
+                                          "北海道太郎の住所を教えてください。",
+                                          "奈良太郎の誕生日を教えてください。"
                                           ],
                                 inputs=question1_text)
             with gr.Row():
                 with gr.Column():
                     chat_button = gr.Button(value="送信", label="chat", variant="primary")
+
+        with gr.TabItem(label="Step-0.データ入力"):
+            with gr.Row():
+                with gr.Column():
+                    save_message_text = gr.HTML(show_label=False, visible=False)
+            with gr.Row():
+                with gr.Column():
+                    name_text = gr.Textbox(label="名前", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    department_name_text = gr.Textbox(label="部署", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    hire_date_text = gr.Textbox(label="入社日", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    birthday_text = gr.Textbox(label="誕生日", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    salary_text = gr.Textbox(label="給料", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    address_text = gr.Textbox(label="住所", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    password_text = gr.Textbox(label="パスワード", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    role_text = gr.Textbox(label="ロール", lines=1)
+            with gr.Row():
+                with gr.Column():
+                    vector_flag_text = gr.Textbox(label="ベクトル化フラグ", lines=1, visible=False, value="N")
+            with gr.Row():
+                with gr.Column():
+                    gr.Examples(examples=[
+                        ["東京太郎", "人事部", "2018-11-10", "1990-05-10", "300000", "東京都", "123456", "admin"],
+                        ["大阪太郎", "システム部", "2019-09-01", "1991-06-10", "310000", "大阪府", "123456", "user"],
+                        ["北海道太郎", "総務部", "2020-09-01", "1992-06-10", "320000", "北海道", "123456", "user"],
+                        ["奈良太郎", "人事部", "2021-09-01", "1993-06-10", "330000", "奈良市", "123456", "user"],
+                        ["青森太郎", "営業部", "2022-09-01", "1994-06-10", "340000", "青森市", "123456", "user"],
+                        ["京都太郎", "総務部", "2023-09-01", "1995-06-10", "350000", "京都府", "123456", "user"]],
+                        inputs=[name_text, department_name_text, hire_date_text, birthday_text, salary_text,
+                                address_text, password_text, role_text])
+            with gr.Row():
+                with gr.Column():
+                    save_report_button = gr.Button(value="保存", label="save", variant="primary")
 
         with gr.TabItem(label="Step-1.ドキュメントのロード"):
             with gr.Row():
@@ -232,17 +529,19 @@ with gr.Blocks() as app:
                                                    show_copy_button=True)
             with gr.Row():
                 with gr.Column():
-                    # file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
-                    file_text = gr.File(label="ファイル", file_types=[".pdf"], type="file")
-                with gr.Column(visible=False):
-                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
-            with gr.Row():
+                    load_from_db_button = gr.Button(value="DBからロード", label="load_from_db", variant="primary")
+
+            with gr.Row(visible=False):
                 with gr.Column():
-                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/2203103.pdf"),
-                                          os.path.join(os.path.dirname(__file__), "files/2020_no012.pdf")],
+                    file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
+                with gr.Column():
+                    web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
+            with gr.Row(visible=False):
+                with gr.Column():
+                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/suzukihonami.txt")],
                                 label="ファイル事例",
                                 inputs=file_text)
-                with gr.Column(visible=False):
+                with gr.Column():
                     gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
                                           "https://ja.wikipedia.org/wiki/ニュースの女",
                                           "https://ja.wikipedia.org/wiki/鈴木保奈美",
@@ -250,7 +549,7 @@ with gr.Blocks() as app:
                                 label="ウェブ・ページ事例",
                                 inputs=web_page_url_text)
 
-            with gr.Row():
+            with gr.Row(visible=False):
                 with gr.Column():
                     load_button = gr.Button(value="ロード", label="load", variant="primary")
 
@@ -271,10 +570,10 @@ with gr.Blocks() as app:
                     chunk_size_text = gr.Textbox(label="チャンク・サイズ(Chunk Size)", lines=1, value="500")
                 with gr.Column():
                     chunk_overlap_text = gr.Textbox(label="チャンク・オーバーラップ(Chunk Overlap)", lines=1,
-                                                    value="100")
+                                                    value="0")
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100], [1000, 200]],
+                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100]],
                                 inputs=[chunk_size_text, chunk_overlap_text])
             with gr.Row():
                 with gr.Column():
@@ -318,8 +617,11 @@ with gr.Blocks() as app:
                     question2_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["チップ接合耐久性と放熱性の両方を実現するために有用な素材は何ですか？",
-                                          "1エリア1方向加工を実現するための課題と解決策は何ですか？"
+                    gr.Examples(examples=["東京太郎の部署を教えてください。",
+                                          "大阪太郎の部署を教えてください。",
+                                          "東京太郎の給料を教えてください。",
+                                          "北海道太郎の住所を教えてください。",
+                                          "奈良太郎の誕生日を教えてください。"
                                           ],
                                 inputs=question2_text)
             with gr.Row():
@@ -329,6 +631,16 @@ with gr.Blocks() as app:
         chat_button.click(chat_stream,
                           inputs=[question1_text],
                           outputs=[answer1_text])
+
+        save_report_button.click(save_report,
+                                 inputs=[name_text, department_name_text, hire_date_text, birthday_text, salary_text,
+                                         address_text, password_text, role_text, vector_flag_text],
+                                 outputs=[save_message_text])
+
+        load_from_db_button.click(load_document_from_db,
+                                  inputs=[],
+                                  outputs=[page_count_text, page_content_text],
+                                  )
 
         load_button.click(load_document,
                           inputs=[file_text, web_page_url_text],
@@ -352,5 +664,4 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=7862,
-               auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
+    app.launch(server_name="0.0.0.0", server_port=7861, auth=login)

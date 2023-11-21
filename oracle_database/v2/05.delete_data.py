@@ -17,8 +17,9 @@ ORACLE_DB_CONNECT_STRING = os.environ['ORACLE_DB_CONNECT_STRING']
 # 创建引擎
 engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
 
-delete_stmt = text("DELETE from daily_task_report")
-select_stmt = text("SELECT employee_name, task_report FROM daily_task_report")
+delete_stmt = text("DELETE from employee")
+select_stmt = text("SELECT name, department_name, hire_date, birthday, salary, "
+                   "address, password, role, vector_flag FROM employee")
 with Session(engine) as session:
     try:
         print("========= select data before delete =========")
@@ -26,7 +27,10 @@ with Session(engine) as session:
         original_row_count = 0
         for row in result:
             original_row_count += 1
-            print(f"employee_name: {row.employee_name}, task_report: {row.task_report}")
+            print(
+                f"name: {row.name}, department_name: {row.department_name}, hire_date: {row.hire_date}, "
+                f"birthday: {row.birthday}, salary: {row.salary}, address: {row.address}, password: {row.password}, "
+                f"role: {row.role}, vector_flag: {row.vector_flag}")
 
         result = session.execute(delete_stmt)
         # print(result.rowcount)

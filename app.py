@@ -27,6 +27,7 @@ _ = load_dotenv(find_dotenv())
 
 openai.api_key = os.environ['OPENAI_API_KEY']
 openai.api_base = os.environ['OPENAI_API_BASE']
+llm_model = os.environ['LLM_MODEL']
 os.environ["LANGCHAIN_API_KEY"] = os.environ["LANGCHAIN_API_KEY"]
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 
@@ -41,7 +42,7 @@ embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", in
 embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
 # embedding_search_document = OpenAIEmbeddings()
 # embedding_search_query = OpenAIEmbeddings()
-llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+llm = ChatOpenAI(model_name=llm_model, temperature=0)
 
 # PGVector needs the connection string to the database.
 CONNECTION_STRING = os.environ["CONNECTION_STRING"]
@@ -92,7 +93,7 @@ def split_document(chunk_size_text, chunk_overlap_text):
 
     global data, all_splits
     all_splits = text_splitter.split_documents(data)
-    # print(f"all_splits: {all_splits}")
+    print(f"all_splits: {all_splits}")
     chunk_count_text = len(all_splits)
     first_trunk_content_text = all_splits[0].page_content
     last_trunk_content_text = all_splits[-1].page_content
@@ -110,17 +111,17 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     """
     first_trunk_vector_text = embedding_search_document.embed_documents([cope_of_first_trunk_content_text])
     last_trunk_vector_text = embedding_search_document.embed_documents([cope_of_last_trunk_content_text])
-    if os.path.exists(persist_directory):
-        if len(os.listdir(persist_directory)) > 0:
-            for root, dirs, files in os.walk(persist_directory, topdown=False):
-                for name in files:
-                    os.remove(os.path.join(root, name))
-                for name in dirs:
-                    os.rmdir(os.path.join(root, name))
-            os.rmdir(persist_directory)
-        else:
-            os.rmdir(persist_directory)
     # Use Chroma
+    # if os.path.exists(persist_directory):
+    #     if len(os.listdir(persist_directory)) > 0:
+    #         for root, dirs, files in os.walk(persist_directory, topdown=False):
+    #             for name in files:
+    #                 os.remove(os.path.join(root, name))
+    #             for name in dirs:
+    #                 os.rmdir(os.path.join(root, name))
+    #         os.rmdir(persist_directory)
+    #     else:
+    #         os.rmdir(persist_directory)
     # Chroma.from_documents(persist_directory=persist_directory,
     #                       collection_name="docs",
     #                       documents=all_splits,
@@ -129,7 +130,7 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     PGVector.from_documents(
         embedding=embedding_search_document,
         documents=all_splits,
-        collection_name="docs",
+        collection_name="docs_common",
         connection_string=CONNECTION_STRING,
         pre_delete_collection=True,  # Overriding a vectorstore
     )
@@ -138,7 +139,7 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     return gr.Textbox(value=first_trunk_vector_text), gr.Textbox(value=last_trunk_vector_text)
 
 
-@tool
+# @tool
 def chat_document_stream(question2_text):
     """
     Retrieve relevant splits for any question using similarity search.
@@ -149,7 +150,7 @@ def chat_document_stream(question2_text):
     #                      embedding_function=embedding_search_query)
     # Use PGVector
     vectorstore = PGVector(connection_string=CONNECTION_STRING,
-                           collection_name="docs",
+                           collection_name="docs_common",
                            embedding_function=embedding_search_query,
                            )
     docs_dataframe = []
@@ -160,7 +161,9 @@ def chat_document_stream(question2_text):
         # print("Score: ", score)
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
-    template = """Use the following pieces of context to answer the question at the end. 
+    template = """
+    Please Answer in Japanese.
+    Use the following pieces of context to answer the question at the end. 
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
     Use ten sentences maximum and keep the answer as concise as possible.
     Don't try to answer anything that isn't in context.  
@@ -183,7 +186,7 @@ def chat_document_stream(question2_text):
     # Method-2
     message = rag_prompt_custom.format_prompt(context=docs, question=question2_text)
     result = llm(message.to_messages())
-    return gr.Dataframe(value=docs_dataframe), gr.Textbox(result.content)
+    return gr.Dataframe(value=docs_dataframe, wrap=True, column_widths=["70%", "30%"]), gr.Textbox(result.content)
 
 
 with gr.Blocks() as app:
@@ -291,6 +294,8 @@ with gr.Blocks() as app:
                         datatype=["str", "str"],
                         row_count=5,
                         col_count=(2, "fixed"),
+                        wrap=True,
+                        column_widths=["70%", "30%"]
                     )
             with gr.Row():
                 with gr.Column():
@@ -335,4 +340,5 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=7860)
+    app.launch(server_name="0.0.0.0", server_port=7860,
+               auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
