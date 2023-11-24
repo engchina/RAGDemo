@@ -37,8 +37,8 @@ refer: [https://python.langchain.com/docs/use_cases/question_answering/](https:/
 PGVector の起動、
 
 ```
-mkdir -p /root/pg/data; chmod 777 /root/pg/data
-docker run --name pgvector --restart=always -p 5454:5432 -v /root/pg/data:/var/lib/postgresql/data -e POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=ja-x-icu" -e POSTGRES_USER=username -e POSTGRES_PASSWORD=password -e POSTGRES_DB=postgres -d ankane/pgvector:v0.5.1
+mkdir -p /root/data/pg; chmod 777 /root/data/pg
+docker run --name pgvector --restart=always -p 5432:5432 -v /root/data/pg:/var/lib/postgresql/data -e POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=ja-x-icu" -e POSTGRES_USER=username -e POSTGRES_PASSWORD=password -e POSTGRES_DB=postgres -d ankane/pgvector:v0.5.1
 ```
 
 拡張機能を有効にする、

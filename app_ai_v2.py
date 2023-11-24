@@ -11,7 +11,7 @@ from langchain.document_loaders import WebBaseLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from langchain.vectorstores import Chroma
-from langchain.chat_models import ChatOpenAI
+from langchain.chat_models import ChatOpenAI, ChatAnthropic
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.embeddings import CohereEmbeddings
 from mylangchain.embeddings import CohereEmbeddings
@@ -48,7 +48,8 @@ embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", in
 embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
 # embedding_search_document = OpenAIEmbeddings()
 # embedding_search_query = OpenAIEmbeddings()
-llm = ChatOpenAI(model_name=llm_model, temperature=0)
+# llm = ChatOpenAI(model_name=llm_model, temperature=0)
+llm = ChatAnthropic()
 
 # PGVector needs the connection string to the database.
 CONNECTION_STRING = os.environ["CONNECTION_STRING"]

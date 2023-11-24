@@ -172,7 +172,6 @@ def chat_document_stream(question2_text):
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
     template = """
-    Please Answer in Japanese.
     Use the following pieces of context to answer the question at the end. 
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
     Use ten sentences maximum and keep the answer as concise as possible.
@@ -352,5 +351,6 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=7862,
-               auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
+    # app.launch(server_name="0.0.0.0", server_port=7862,
+    #            auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
+    app.launch(server_name="0.0.0.0", server_port=7862)
