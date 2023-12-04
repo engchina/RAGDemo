@@ -50,7 +50,7 @@ embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input
 llm = ChatOpenAI(model_name=llm_model, temperature=0)
 
 # PGVector needs the connection string to the database.
-CONNECTION_STRING = os.environ["CONNECTION_STRING"]
+PGVECTOR_CONNECTION_STRING = os.environ["PGVECTOR_CONNECTION_STRING"]
 
 ORACLE_DB_CONNECT_STRING = os.environ['ORACLE_DB_CONNECT_STRING']
 
@@ -271,7 +271,7 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
         embedding=embedding_search_document,
         documents=all_splits,
         collection_name="docs_ai",
-        connection_string=CONNECTION_STRING,
+        connection_string=PGVECTOR_CONNECTION_STRING,
         pre_delete_collection=pre_delete_collection,  # Overriding a vectorstore
     )
     # print(f"vectorstore: {vectorstore}")
@@ -289,7 +289,7 @@ def chat_document_stream(question2_text):
     # vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
     #                      embedding_function=embedding_search_query)
     # Use PGVector
-    vectorstore = PGVector(connection_string=CONNECTION_STRING,
+    vectorstore = PGVector(connection_string=PGVECTOR_CONNECTION_STRING,
                            collection_name="docs_ai",
                            embedding_function=embedding_search_query,
                            )

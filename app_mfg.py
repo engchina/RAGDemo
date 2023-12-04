@@ -48,7 +48,7 @@ embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input
 llm = ChatOpenAI(model_name=llm_model, temperature=0)
 
 # PGVector needs the connection string to the database.
-CONNECTION_STRING = os.environ["CONNECTION_STRING"]
+PGVECTOR_CONNECTION_STRING = os.environ["PGVECTOR_CONNECTION_STRING"]
 
 
 def chat_stream(question1_text):
@@ -141,7 +141,7 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
         embedding=embedding_search_document,
         documents=all_splits,
         collection_name="docs_mfg",
-        connection_string=CONNECTION_STRING,
+        connection_string=PGVECTOR_CONNECTION_STRING,
         pre_delete_collection=True,  # Overriding a vectorstore
     )
     # print(f"vectorstore: {vectorstore}")
@@ -159,7 +159,7 @@ def chat_document_stream(question2_text):
     # vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
     #                      embedding_function=embedding_search_query)
     # Use PGVector
-    vectorstore = PGVector(connection_string=CONNECTION_STRING,
+    vectorstore = PGVector(connection_string=PGVECTOR_CONNECTION_STRING,
                            collection_name="docs_mfg",
                            embedding_function=embedding_search_query,
                            )
@@ -221,7 +221,7 @@ with gr.Blocks() as app:
                 with gr.Column():
                     chat_button = gr.Button(value="送信", label="chat", variant="primary")
 
-        with gr.TabItem(label="Step-1.ドキュメントのロード"):
+        with gr.TabItem(label="Step-1.ドキュメントの読込み"):
             with gr.Row():
                 with gr.Column():
                     page_count_text = gr.Textbox(label="ページ数", lines=1)
@@ -251,7 +251,7 @@ with gr.Blocks() as app:
 
             with gr.Row():
                 with gr.Column():
-                    load_button = gr.Button(value="ロード", label="load", variant="primary")
+                    load_button = gr.Button(value="読込み", label="load", variant="primary")
 
         with gr.TabItem(label="Step-2.ドキュメントの分割"):
             with gr.Row():
@@ -353,4 +353,5 @@ app.queue()
 if __name__ == "__main__":
     # app.launch(server_name="0.0.0.0", server_port=7862,
     #            auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
-    app.launch(server_name="0.0.0.0", server_port=7862)
+    # app.launch(server_name="0.0.0.0", server_port=7862)
+    app.launch(server_port=7862)

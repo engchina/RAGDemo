@@ -180,3 +180,6 @@ ipython_config.py
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pip
+
+# Oracle
+tls_wallet

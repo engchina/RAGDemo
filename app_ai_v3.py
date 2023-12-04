@@ -56,9 +56,29 @@ PGVECTOR_CONNECTION_STRING = os.environ["PGVECTOR_CONNECTION_STRING"]
 
 ORACLE_DB_CONNECT_STRING = os.environ['ORACLE_DB_CONNECT_STRING']
 
+MY_ADB_ADMIN_USER = os.environ['MY_ADB_ADMIN_USER']
+MY_ADB_APP_USER = os.environ['MY_ADB_APP_USER']
+MY_ADB_SERVICE_NAME = os.environ['MY_ADB_SERVICE_NAME']
+MY_ATP_CONFIG_DIR = os.environ['MY_ATP_CONFIG_DIR']
+MY_ATP_WALLET_LOCATION = os.environ['MY_ATP_WALLET_LOCATION']
+MY_ADB_WALLET_PASSWORD = os.environ['MY_ADB_WALLET_PASSWORD']
+MY_ADW_ADMIN_PASSWORD = os.environ['MY_ADW_ADMIN_PASSWORD']
+MY_ATP_ADMIN_PASSWORD = os.environ['MY_ATP_ADMIN_PASSWORD']
+
 # print(sqlalchemy.__version__)
 # 创建引擎
-engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
+# Connect to the Oracle Database
+# engine = create_engine(ORACLE_DB_CONNECT_STRING, echo=False)
+# Connect to the Oracle ADB
+engine = create_engine(f'oracle+oracledb://:@',
+                       connect_args={
+                           "user": MY_ADB_APP_USER,
+                           "password": MY_ATP_ADMIN_PASSWORD,
+                           "dsn": MY_ADB_SERVICE_NAME,
+                           "config_dir": MY_ATP_CONFIG_DIR,
+                           "wallet_location": MY_ATP_WALLET_LOCATION,
+                           "wallet_password": MY_ADB_WALLET_PASSWORD,
+                       }, echo=False)
 
 
 def login(username, password):
@@ -358,15 +378,15 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     # Use PGVector
     PGVector.from_documents(
         embedding=embedding_search_document,
-        documents=all_splits,
-        collection_name="docs_ai_admin",
+        documents=all_splits_for_user,
+        collection_name="docs_ai_user",
         connection_string=PGVECTOR_CONNECTION_STRING,
-        pre_delete_collection=False,  # Overriding a vectorstore
+        pre_delete_collection=True,  # Overriding a vectorstore
     )
     PGVector.from_documents(
         embedding=embedding_search_document,
-        documents=all_splits_for_user,
-        collection_name="docs_ai_user",
+        documents=all_splits,
+        collection_name="docs_ai_admin",
         connection_string=PGVECTOR_CONNECTION_STRING,
         pre_delete_collection=False,  # Overriding a vectorstore
     )
@@ -450,7 +470,7 @@ def chat_document_stream(question2_text):
 
 
 with gr.Blocks() as app:
-    gr.Markdown(value="# RAG デモ")
+    gr.Markdown(value="# RAG デモ With Oracle Database")
 
     with gr.Tabs() as tabs:
         with gr.TabItem(label="Step--1.チャット"):
