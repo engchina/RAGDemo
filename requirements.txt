@@ -22,5 +22,5 @@ pgvector==0.2.3
 psycopg2-binary==2.9.9
 SQLAlchemy==2.0.22
 jupyterlab==4.0.8
-oracledb==1.4.2
+# oracledb==1.4.0
 pymupdf==1.23.6

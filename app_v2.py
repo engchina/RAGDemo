@@ -1,17 +1,14 @@
 import os
 import openai
 import sys
-
-import pandas as pd
 from dotenv import load_dotenv, find_dotenv
 
 # from curl_cffi import requests
-# from langchain.document_loaders import WebBaseLoader, TextLoader, PyMuPDFLoader
-from langchain.document_loaders import WebBaseLoader, PyMuPDFLoader
+from langchain.document_loaders import WebBaseLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from langchain.vectorstores import Chroma
-from langchain.chat_models import ChatOpenAI
+from langchain.chat_models import ChatOpenAI, ChatAnthropic
 from langchain.embeddings import OpenAIEmbeddings
 # from langchain.embeddings import CohereEmbeddings
 from mylangchain.embeddings import CohereEmbeddings
@@ -22,6 +19,8 @@ from langchain.tools import tool
 
 import gradio as gr
 from langchain.vectorstores.pgvector import PGVector
+
+from mylangchain.vectorstores.oracleaivector import OracleAIVector
 
 sys.path.append('../..')
 
@@ -41,14 +40,17 @@ persist_directory = './docs/chroma/'
 "classification": Use this when you use the embeddings as an input to a text classifier.
 "clustering": Use this when you want to cluster the embeddings.
 """
-embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
-embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
-# embedding_search_document = OpenAIEmbeddings()
-# embedding_search_query = OpenAIEmbeddings()
+# embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
+# embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+embedding_search_document = OpenAIEmbeddings()
+embedding_search_query = OpenAIEmbeddings()
+
 llm = ChatOpenAI(model_name=llm_model, temperature=0)
+# llm = ChatAnthropic()
 
 # PGVector needs the connection string to the database.
-PGVECTOR_CONNECTION_STRING = os.environ["PGVECTOR_CONNECTION_STRING"]
+# PGVECTOR_CONNECTION_STRING = os.environ["PGVECTOR_CONNECTION_STRING"]
+ORACLE_AI_VECTOR_CONNECTION_STRING = os.environ["ORACLE_AI_VECTOR_CONNECTION_STRING"]
 
 
 def chat_stream(question1_text):
@@ -71,27 +73,20 @@ def load_document(file_text, web_page_url_text):
     A Document is a dict with text (page_content) and metadata.
     """
     if web_page_url_text == "" or web_page_url_text is None:
-        loader = PyMuPDFLoader(file_text.name)
+        loader = TextLoader(file_text.name)
     else:
         loader = WebBaseLoader(web_page_url_text)
 
     global data
     data = loader.load()
     # print(f"data: {data}")
-    all_page_content_text = ""
     page_count = len(data)
-    for i in range(page_count):
-        page_content_text = data[i].page_content
-        while "\n\n" in page_content_text:
-            page_content_text = page_content_text.replace("\n\n", "=" * 20)
-        while "\n" in page_content_text:
-            page_content_text = page_content_text.replace("\n", " ")
-        while "=" * 20 in page_content_text:
-            page_content_text = page_content_text.replace("=" * 20, "\n")
-        data[i].page_content = page_content_text
-        all_page_content_text += "\n\n" + page_content_text
+    page_content_text = data[0].page_content
+    while "\n\n" in page_content_text:
+        page_content_text = page_content_text.replace("\n\n", "\n")
+    data[0].page_content = page_content_text
 
-    return gr.Textbox(value=str(page_count)), gr.Textbox(value=all_page_content_text)
+    return gr.Textbox(value=str(page_count)), gr.Textbox(value=page_content_text)
 
 
 def split_document(chunk_size_text, chunk_overlap_text):
@@ -103,7 +98,7 @@ def split_document(chunk_size_text, chunk_overlap_text):
 
     global data, all_splits
     all_splits = text_splitter.split_documents(data)
-    # print(f"all_splits: {all_splits}")
+    print(f"all_splits: {all_splits}")
     chunk_count_text = len(all_splits)
     first_trunk_content_text = all_splits[0].page_content
     last_trunk_content_text = all_splits[-1].page_content
@@ -137,13 +132,20 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     #                       documents=all_splits,
     #                       embedding=embedding_search_document)
     # Use PGVector
-    PGVector.from_documents(
+    # PGVector.from_documents(
+    #     embedding=embedding_search_document,
+    #     documents=all_splits,
+    #     collection_name="docs_common",
+    #     connection_string=PGVECTOR_CONNECTION_STRING,
+    #     pre_delete_collection=True,  # Overriding a vectorstore
+    # )
+    # Use PGVector
+    OracleAIVector.from_documents(
         embedding=embedding_search_document,
         documents=all_splits,
-        collection_name="docs_mfg",
-        connection_string=PGVECTOR_CONNECTION_STRING,
+        collection_name="docs_common",
+        connection_string=ORACLE_AI_VECTOR_CONNECTION_STRING,
         pre_delete_collection=True,  # Overriding a vectorstore
-        echo=True,
     )
     # print(f"vectorstore: {vectorstore}")
 
@@ -160,11 +162,15 @@ def chat_document_stream(question2_text):
     # vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
     #                      embedding_function=embedding_search_query)
     # Use PGVector
-    vectorstore = PGVector(connection_string=PGVECTOR_CONNECTION_STRING,
-                           collection_name="docs_mfg",
-                           embedding_function=embedding_search_query,
-                           engine_args={"echo": True},
-                           )
+    # vectorstore = PGVector(connection_string=PGVECTOR_CONNECTION_STRING,
+    #                        collection_name="docs_common",
+    #                        embedding_function=embedding_search_query,
+    #                        )
+    # Use OracleAIVector
+    vectorstore = OracleAIVector(connection_string=ORACLE_AI_VECTOR_CONNECTION_STRING,
+                                 collection_name="docs_common",
+                                 embedding_function=embedding_search_query,
+                                 )
     docs_dataframe = []
     docs = vectorstore.similarity_search_with_score(question2_text)
     # print(f"len(docs): {len(docs)}")
@@ -174,6 +180,7 @@ def chat_document_stream(question2_text):
         docs_dataframe.append([doc.page_content, doc.metadata["source"]])
 
     template = """
+    Please Answer in Japanese.
     Use the following pieces of context to answer the question at the end. 
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
     Use ten sentences maximum and keep the answer as concise as possible.
@@ -196,7 +203,6 @@ def chat_document_stream(question2_text):
 
     # Method-2
     message = rag_prompt_custom.format_prompt(context=docs, question=question2_text)
-    print(f"message.to_messages(): {message.to_messages()}")
     result = llm(message.to_messages())
     return gr.Dataframe(value=docs_dataframe, wrap=True, column_widths=["70%", "30%"]), gr.Textbox(result.content)
 
@@ -215,15 +221,16 @@ with gr.Blocks() as app:
                     question1_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["チップ接合耐久性と放熱性の両方を実現するために有用な素材は何ですか？",
-                                          "1エリア1方向加工を実現するための課題と解決策は何ですか？"
+                    gr.Examples(examples=["鈴木保奈美さんの誕生日を教えてください",
+                                          "鈴木保奈美さんの出身を教えてください",
+                                          "鈴木保奈美さんの主な作品を教えてください"
                                           ],
                                 inputs=question1_text)
             with gr.Row():
                 with gr.Column():
                     chat_button = gr.Button(value="送信", label="chat", variant="primary")
 
-        with gr.TabItem(label="Step-1.ドキュメントの読込み"):
+        with gr.TabItem(label="Step-1.ドキュメントのロード"):
             with gr.Row():
                 with gr.Column():
                     page_count_text = gr.Textbox(label="ページ数", lines=1)
@@ -233,17 +240,15 @@ with gr.Blocks() as app:
                                                    show_copy_button=True)
             with gr.Row():
                 with gr.Column():
-                    # file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
-                    file_text = gr.File(label="ファイル", file_types=[".pdf"], type="file")
-                with gr.Column(visible=False):
+                    file_text = gr.File(label="ファイル", file_types=[".txt"], type="file")
+                with gr.Column():
                     web_page_url_text = gr.Textbox(label="ウェブ・ページ", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/2203103.pdf"),
-                                          os.path.join(os.path.dirname(__file__), "files/2020_no012.pdf")],
+                    gr.Examples(examples=[os.path.join(os.path.dirname(__file__), "files/suzukihonami.txt")],
                                 label="ファイル事例",
                                 inputs=file_text)
-                with gr.Column(visible=False):
+                with gr.Column():
                     gr.Examples(examples=["https://ja.wikipedia.org/wiki/東京ラブストーリー",
                                           "https://ja.wikipedia.org/wiki/ニュースの女",
                                           "https://ja.wikipedia.org/wiki/鈴木保奈美",
@@ -253,7 +258,7 @@ with gr.Blocks() as app:
 
             with gr.Row():
                 with gr.Column():
-                    load_button = gr.Button(value="読込み", label="load", variant="primary")
+                    load_button = gr.Button(value="ロード", label="load", variant="primary")
 
         with gr.TabItem(label="Step-2.ドキュメントの分割"):
             with gr.Row():
@@ -275,7 +280,7 @@ with gr.Blocks() as app:
                                                     value="100")
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100], [1000, 200]],
+                    gr.Examples(examples=[[50, 0], [200, 0], [500, 0], [500, 100]],
                                 inputs=[chunk_size_text, chunk_overlap_text])
             with gr.Row():
                 with gr.Column():
@@ -319,9 +324,9 @@ with gr.Blocks() as app:
                     question2_text = gr.Textbox(label="質問", lines=1)
             with gr.Row():
                 with gr.Column():
-                    gr.Examples(examples=["チップ接合耐久性と放熱性の両方を実現するために有用な素材は何ですか？",
-                                          "1エリア1方向加工を実現するための課題と解決策は何ですか？"
-                                          ],
+                    gr.Examples(examples=["鈴木保奈美さんの誕生日を教えてください",
+                                          "鈴木保奈美さんの出身を教えてください",
+                                          "鈴木保奈美さんの主な作品を教えてください"],
                                 inputs=question2_text)
             with gr.Row():
                 with gr.Column():
@@ -353,7 +358,6 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    # app.launch(server_name="0.0.0.0", server_port=7862,
+    # app.launch(server_name="0.0.0.0", server_port=7860,
     #            auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
-    # app.launch(server_name="0.0.0.0", server_port=7862)
-    app.launch(server_port=7862)
+    app.launch(server_name="0.0.0.0", server_port=7860)

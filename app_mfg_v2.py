@@ -21,7 +21,7 @@ from langchain.prompts import PromptTemplate
 from langchain.tools import tool
 
 import gradio as gr
-from langchain.vectorstores.pgvector import PGVector
+from mylangchain.vectorstores.oracleaivector import OracleAIVector
 
 sys.path.append('../..')
 
@@ -41,14 +41,15 @@ persist_directory = './docs/chroma/'
 "classification": Use this when you use the embeddings as an input to a text classifier.
 "clustering": Use this when you want to cluster the embeddings.
 """
-embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
-embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
-# embedding_search_document = OpenAIEmbeddings()
-# embedding_search_query = OpenAIEmbeddings()
+# embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
+# embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+embedding_search_document = OpenAIEmbeddings()
+embedding_search_query = OpenAIEmbeddings()
 llm = ChatOpenAI(model_name=llm_model, temperature=0)
 
 # PGVector needs the connection string to the database.
-PGVECTOR_CONNECTION_STRING = os.environ["PGVECTOR_CONNECTION_STRING"]
+ORACLE_AI_VECTOR_CONNECTION_STRING = os.environ["ORACLE_AI_VECTOR_CONNECTION_STRING"]
+# ORACLE_AI_VECTOR_CONNECTION_STRING = os.environ["ORACLE_DB_CONNECT_STRING"]
 
 
 def chat_stream(question1_text):
@@ -136,14 +137,13 @@ def embed_document(cope_of_first_trunk_content_text, cope_of_last_trunk_content_
     #                       collection_name="docs",
     #                       documents=all_splits,
     #                       embedding=embedding_search_document)
-    # Use PGVector
-    PGVector.from_documents(
+    # Use OracleAIVector
+    OracleAIVector.from_documents(
         embedding=embedding_search_document,
         documents=all_splits,
         collection_name="docs_mfg",
-        connection_string=PGVECTOR_CONNECTION_STRING,
+        connection_string=ORACLE_AI_VECTOR_CONNECTION_STRING,
         pre_delete_collection=True,  # Overriding a vectorstore
-        echo=True,
     )
     # print(f"vectorstore: {vectorstore}")
 
@@ -159,12 +159,11 @@ def chat_document_stream(question2_text):
     # Use Chroma
     # vectorstore = Chroma(persist_directory=persist_directory, collection_name="docs",
     #                      embedding_function=embedding_search_query)
-    # Use PGVector
-    vectorstore = PGVector(connection_string=PGVECTOR_CONNECTION_STRING,
-                           collection_name="docs_mfg",
-                           embedding_function=embedding_search_query,
-                           engine_args={"echo": True},
-                           )
+    # Use OracleAIVector
+    vectorstore = OracleAIVector(connection_string=ORACLE_AI_VECTOR_CONNECTION_STRING,
+                                 collection_name="docs_mfg",
+                                 embedding_function=embedding_search_query,
+                                 )
     docs_dataframe = []
     docs = vectorstore.similarity_search_with_score(question2_text)
     # print(f"len(docs): {len(docs)}")

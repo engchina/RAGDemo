@@ -38,14 +38,14 @@ PGVector の起動、
 
 ```
 mkdir -p /root/data/pg; chmod 777 /root/data/pg
-docker run --name pgvector --restart=always -p 5432:5432 -v /root/data/pg:/var/lib/postgresql/data:rw -e POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=ja-x-icu" -e POSTGRES_USER=username -e POSTGRES_PASSWORD=password -e POSTGRES_DB=postgres -d ankane/pgvector:v0.5.1
+docker run --name pgvector --restart=always -p 5432:5432 -v /root/data/pg:/var/lib/postgresql/data:rw -e POSTGRES_INITDB_ARGS="--locale-provider=icu --icu-locale=ja-x-icu" -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -e POSTGRES_DB=postgres -d ankane/pgvector:v0.5.1
 ```
 
 拡張機能を有効にする、
 
 ```
 docker exec -it pgvector bash
-psql -U username -d postgres
+psql -U postgres -d postgres
 CREATE EXTENSION vector;
 ```
 
@@ -53,7 +53,7 @@ CREATE EXTENSION vector;
 
 ```
 docker exec -it pgvector bash
-psql -U username -d postgres
+psql -U postgres -d postgres
 CREATE DATABASE ragdemo;
 ```
 

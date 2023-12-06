@@ -25,7 +25,7 @@ engine = create_engine(f'oracle+oracledb://:@',
                            "dsn": MY_DB23C_DSN_NAME
                        }, echo=False)
 
-select_stmt = text("SELECT id, embeddings FROM T1")
+select_stmt = text("SELECT id, embeddings FROM T2")
 with Session(engine) as session:
     try:
         print("========= select data =========")

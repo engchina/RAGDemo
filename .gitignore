@@ -183,3 +183,8 @@ ipython_config.py
 
 # Oracle
 tls_wallet
+
+README_INTERNAL.md
+
+mylangchain/vectorstores
+oracle_database/v4
