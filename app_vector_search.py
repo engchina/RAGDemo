@@ -4,6 +4,7 @@ import sys
 import gradio as gr
 from dotenv import load_dotenv, find_dotenv
 from langchain.document_loaders import TextLoader
+from langchain.embeddings import OpenAIEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
@@ -17,6 +18,8 @@ _ = load_dotenv(find_dotenv())
 
 embedding_search_document = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_document")
 embedding_search_query = CohereEmbeddings(model="embed-multilingual-v3.0", input_type="search_query")
+# embedding_search_document = OpenAIEmbeddings()
+# embedding_search_query = OpenAIEmbeddings()
 
 ORACLE_AI_VECTOR_CONNECTION_STRING = os.environ["ORACLE_AI_VECTOR_CONNECTION_STRING"]
 

@@ -161,7 +161,7 @@ cython_debug/
 .env
 docs
 bak
-test.py
+test/test.py
 
 # PyCharm coverage
 *.iml
@@ -188,3 +188,5 @@ README_INTERNAL.md
 
 mylangchain/vectorstores
 oracle_database/v4
+
+test/
