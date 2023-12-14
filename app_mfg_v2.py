@@ -1,26 +1,19 @@
 import os
-import openai
 import sys
 
-import pandas as pd
+import gradio as gr
+import openai
 from dotenv import load_dotenv, find_dotenv
-
+from langchain.chat_models import ChatOpenAI
 # from curl_cffi import requests
 # from langchain.document_loaders import WebBaseLoader, TextLoader, PyMuPDFLoader
 from langchain.document_loaders import WebBaseLoader, PyMuPDFLoader
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.prompts import PromptTemplate
+# from langchain.embeddings import CohereEmbeddings
+from langchain.schema import HumanMessage, SystemMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from langchain.vectorstores import Chroma
-from langchain.chat_models import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
-# from langchain.embeddings import CohereEmbeddings
-from mylangchain.embeddings import CohereEmbeddings
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
-from langchain.schema.runnable import RunnablePassthrough
-from langchain.prompts import PromptTemplate
-from langchain.tools import tool
-
-import gradio as gr
 from mylangchain.vectorstores.oracleaivector import OracleAIVector
 
 sys.path.append('../..')
@@ -49,6 +42,8 @@ llm = ChatOpenAI(model_name=llm_model, temperature=0)
 
 # PGVector needs the connection string to the database.
 ORACLE_AI_VECTOR_CONNECTION_STRING = os.environ["ORACLE_AI_VECTOR_CONNECTION_STRING"]
+
+
 # ORACLE_AI_VECTOR_CONNECTION_STRING = os.environ["ORACLE_DB_CONNECT_STRING"]
 
 
@@ -352,7 +347,4 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    # app.launch(server_name="0.0.0.0", server_port=7862,
-    #            auth=[("admin", "123456"), ("user1", "123456"), ("user2", "123456")])
-    # app.launch(server_name="0.0.0.0", server_port=7862)
-    app.launch(server_port=7862)
+    app.launch(server_name="0.0.0.0", server_port=7862, auth=[("sehub", "SEhub__2023"), ("oracle", "SEhub__2023")])

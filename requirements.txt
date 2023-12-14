@@ -12,7 +12,7 @@ gradio==3.50.2
 python-dotenv==1.0.0
 curl_cffi==0.5.10b3
 # -e git+https://github.com/engchina/oci-cohere-python.git@main#egg=cohere
-cohere=4.37
+cohere==4.37
 openai==0.28.1
 anthropic==0.5.0
 bs4==0.0.1
