@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 
@@ -15,6 +16,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 from mylangchain.vectorstores.oracleaivector import OracleAIVector
+from utils import parse_gradio_auth_creds
 
 sys.path.append('../..')
 
@@ -347,4 +349,18 @@ with gr.Blocks() as app:
 
 app.queue()
 if __name__ == "__main__":
-    app.launch(server_name="0.0.0.0", server_port=7862, auth=[("sehub", "SEhub__2023"), ("oracle", "SEhub__2023")])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--port", type=int)
+    parser.add_argument("--gradio-auth-path", type=str, default="auth.txt")
+    args = parser.parse_args()
+    # Set authorization credentials
+    auth = None
+    if args.gradio_auth_path is not None:
+        auth = parse_gradio_auth_creds(args.gradio_auth_path)
+    app.launch(
+        server_name=args.host,
+        server_port=args.port,
+        max_threads=200,
+        auth=auth,
+    )
